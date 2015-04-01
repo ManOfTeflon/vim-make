@@ -1,6 +1,6 @@
-
 let s:Plugin = {}
 let s:MakePlugin = {}
+let s:GdbPlugin = {}
 function! s:Plugin.Activate(path)
     if len(a:path.pathSegments) < 2
         return
@@ -17,6 +17,26 @@ function! s:MakePlugin.Activate(path)
         exec 'edit +' . tokens[2] . ' ' . tokens[1]
         exec 'norm ' . tokens[3] . '|'
     endif
+endfunction
+
+function! s:GdbPlugin.Activate(path)
+    let core = a:path.pathSegments[-1]
+    let logs = join(split(a:path.pathSegments[-1], '/')[:-2], '/') . '/../tracelogs/memsql.log'
+    echo logs
+    exec "Dbg --log=" . logs . " -c " . core . " ./memsqld"
+    call nerdtree#closeTreeIfOpen()
+endfunction
+
+function! s:CreateTree(files, plugin, pos, size)
+    let oldPos = g:NERDTreeWinPos
+    let oldSize = g:NERDTreeWinSize
+
+    let g:NERDTreeWinPos = a:pos
+    let g:NERDTreeWinSize = a:size
+    call NERDTreeFromJSON(a:files, a:plugin)
+
+    let g:NERDTreeWinPos = oldPos
+    let g:NERDTreeWinSize = oldSize
 endfunction
 
 function! s:BuildDict(files, file, nr, line)
@@ -50,7 +70,7 @@ function! s:_VimGrep(word)
         endif
     endfor
 
-    call NERDTreeFromJSON(files, s:Plugin)
+    call s:CreateTree(files, s:Plugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
 endfunction
 
 function! s:Relpath(file)
@@ -64,7 +84,7 @@ function! s:QFixTree()
         call s:BuildDict(files, s:Relpath(bufname(d.bufnr)), d.lnum, d.text)
     endfor
 
-    call NERDTreeFromJSON(files, s:Plugin)
+    call s:CreateTree(files, s:Plugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
 endfunction
 
 function! s:LocListTree(...)
@@ -80,12 +100,33 @@ function! s:LocListTree(...)
         call s:BuildDict(files, s:Relpath(bufname(d.bufnr)), d.lnum, d.text)
     endfor
 
-    call NERDTreeFromJSON(files, s:Plugin)
+    call s:CreateTree(files, s:Plugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
 endfunction
 
+python << EOF
+
+import socket
+import traceback
+import json
+def recv(host, port, command):
+    try:
+        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        conn.connect((host, port))
+
+        conn.send(command)
+        chunks = []
+        while True:
+            data = conn.recv(2048)
+            if len(data) == 0:
+                return json.loads(''.join(chunks))
+            chunks.append(data)
+    except:
+        return { 'error': traceback.format_exc() }
+
+EOF
+
 function! s:RemoteMake()
-    let json = system('netcat 127.0.0.1 8642')
-    let d = pyeval("json.loads(vim.eval('l:json'))")
+    let d = pyeval("recv('127.0.0.1', 8642, '1')")
     let files = {}
 
     for [ file, errors ] in items(d)
@@ -94,15 +135,30 @@ function! s:RemoteMake()
         let nr = 1
         for line in lines
             if len(line)
-                call s:BuildDict(files, s:Relpath(file), printf("%0" . digits . "d", nr), s:Relpath(line))
+                call s:BuildDict(files, s:Relpath(file), printf("_%0" . digits . "d", nr), s:Relpath(line))
                 let nr = nr + 1
             endif
         endfor
     endfor
 
-    call NERDTreeFromJSON(files, s:MakePlugin)
+    call s:CreateTree(files, s:MakePlugin, "bottom", 30)
+    call b:NERDTreeRoot.openRecursively()
+    call nerdtree#renderView()
 endfunction
 
+function! s:DebugCore()
+    let cores = split(system("find . -name core | cut -c3-"), '\n')
+    let tree = { 'cores': {} }
+    for core in cores
+        let tree['cores'][core] = 0
+    endfor
+
+    call s:CreateTree(tree, s:GdbPlugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
+    call b:NERDTreeRoot.openRecursively()
+    call nerdtree#renderView()
+endfunction
+
+command! -nargs=0 FindCores call s:DebugCore()
 command! -nargs=0 RemoteMake call s:RemoteMake()
 
 command! -nargs=1 VimGrep call s:_VimGrep(<f-args>)
