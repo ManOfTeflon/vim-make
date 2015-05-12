@@ -23,7 +23,7 @@ function! s:GdbPlugin.Activate(path)
     let core = a:path.pathSegments[-1]
     let logs = join(split(a:path.pathSegments[-1], '/')[:-2], '/') . '/../tracelogs/memsql.log'
     echo logs
-    exec "Dbg --log=" . logs . " -c " . core . " ./memsqld"
+    exec "GdbStartDebugger --log=" . logs . " -c " . core . " ./memsqld"
     call nerdtree#closeTreeIfOpen()
 endfunction
 
