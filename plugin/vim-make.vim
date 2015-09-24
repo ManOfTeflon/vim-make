@@ -56,6 +56,7 @@ endfunction
 
 function! s:_VimGrep(word)
     let lines = split(system("git grep -n '" . a:word . "'"), '\n')
+    echo "found " . len(lines) . " occurences"
     let files = {}
     for line in lines
         let tokens = split(line, ':')
@@ -147,7 +148,7 @@ function! s:RemoteMake()
 endfunction
 
 function! s:DebugCore()
-    let cores = split(system("find . -name core | cut -c3-"), '\n')
+    let cores = split(system("find . -name 'core.memsqld.*' | cut -c3-"), '\n')
     let tree = { 'cores': {} }
     for core in cores
         let tree['cores'][core] = 0
