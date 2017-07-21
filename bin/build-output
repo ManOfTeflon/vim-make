@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cat build.out | sed -e 's//\n/g' -e 's/\[K//g'
+
