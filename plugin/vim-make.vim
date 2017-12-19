@@ -1,8 +1,11 @@
-let s:Plugin = {}
-let s:LJumpPlugin = {}
-let s:MakePlugin = {}
-let s:GdbPlugin = {}
-function! s:Plugin.Activate(path)
+let s:JumpPlugin = NERDTreeCreatePlugin()
+function! s:JumpPlugin.New(tree)
+    let obj = copy(self)
+    let obj._tree = a:tree
+endfunction
+function! a:JumpPlugin.ParsePath(str)
+endfunction
+function! s:JumpPlugin.Activate(path)
     if len(a:path.pathSegments) < 2
         return
     endif
@@ -11,20 +14,13 @@ function! s:Plugin.Activate(path)
     exec 'edit +' . nr . ' ' . file
 endfunction
 
+let s:LJumpPlugin = NERDTreeCreatePlugin()
 function! s:LJumpPlugin.Activate(path)
-    call s:Plugin.Activate(a:path)
+    call s:JumpPlugin.Activate(a:path)
     call nerdtree#closeTreeIfOpen()
 endfunction
 
-function! s:MakePlugin.Activate(path)
-    let line = a:path.pathSegments[-1]
-    let tokens = matchlist(line, '\d\+:\s\+\(.\+\):\(\d\+\):\(\d\+\):.*')
-    if len(tokens) > 0
-        exec 'edit +' . tokens[2] . ' debug/' . tokens[1]
-        exec 'norm ' . tokens[3] . '|'
-    endif
-endfunction
-
+let s:GdbPlugin = NERDTreeCreatePlugin()
 function! s:GdbPlugin.Activate(path)
     let core = a:path.pathSegments[-1]
     call s:DebugCore(core)
@@ -58,7 +54,7 @@ function! s:BuildDict(files, file, nr, line)
 endfunction
 
 function! s:_VimGrep(word)
-    let lines = split(system("git grep -n '" . a:word . "' -- ':/' ':!memsqltest'"), '\n')
+    let lines = split(system("git grep -n '" . a:word . "' -- ':/'"), '\n')
     echo "found " . len(lines) . " occurences"
     let files = {}
     for line in lines
@@ -74,27 +70,7 @@ function! s:_VimGrep(word)
         endif
     endfor
 
-    call s:CreateTree(files, s:Plugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
-endfunction
-
-function! s:_TestGrep(word)
-    let lines = split(system("git grep -n '" . a:word . "' -- 'memsqltest/'"), '\n')
-    echo "found " . len(lines) . " occurences"
-    let files = {}
-    for line in lines
-        let tokens = split(line, ':')
-        let idx = stridx(line, ':')
-        let idx = stridx(line, ':', idx + 1)
-        let line = substitute(strpart(line, idx + 1), '^\s*\(.\{-}\)\s*$', '\1', '')
-        if len(tokens) < 2
-            let files[line] = 0
-        else
-            let [ file, nr ] = [ tokens[0], tokens[1] ]
-            call s:BuildDict(files, file, nr, line)
-        endif
-    endfor
-
-    call s:CreateTree(files, s:Plugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
+    call s:CreateTree(files, s:JumpPlugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
 endfunction
 
 function! s:Relpath(file)
@@ -108,7 +84,7 @@ function! s:QFixTree()
         call s:BuildDict(files, s:Relpath(bufname(d.bufnr)), d.lnum, d.text)
     endfor
 
-    call s:CreateTree(files, s:Plugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
+    call s:CreateTree(files, s:JumpPlugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
 endfunction
 
 function! s:LocListTree(...)
@@ -124,7 +100,7 @@ function! s:LocListTree(...)
         call s:BuildDict(files, s:Relpath(bufname(d.bufnr)), d.lnum, d.text)
     endfor
 
-    call s:CreateTree(files, s:Plugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
+    call s:CreateTree(files, s:JumpPlugin, g:NERDTreeWinPos, g:NERDTreeWinSize)
 endfunction
 
 function! s:LocListJump(...)
@@ -155,71 +131,6 @@ function! s:LocListJump(...)
     endif
 endfunction
 
-python << EOF
-
-import socket
-import traceback
-import json
-def recv(host, port, command):
-    try:
-        conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        conn.connect((host, port))
-
-        conn.send(command)
-        chunks = []
-        while True:
-            data = conn.recv(2048)
-            if len(data) == 0:
-                return json.loads(''.join(chunks))
-            chunks.append(data)
-    except:
-        return { 'error': traceback.format_exc() }
-
-def load(filename):
-    try:
-        return json.loads(open(filename, 'rb').read())
-    except:
-        return { 'error': traceback.format_exc() }
-
-EOF
-
-function! s:RemoteMake()
-    let lines = split(system("build-output"), "\n")
-    let files = {}
-    let curfile = ""
-    let errlines = []
-
-    for line in lines
-        if curfile != ""
-            if line =~# "^ninja: build stopped: subcommand failed\.$" || line =~# "^[\[0-9\]\\+/\[0-9\]\\+]" || line =~# "FAILED: .*"
-                let digits = len(printf("%d", len(errlines)))
-                let nr = 0
-                for line in errlines
-                    if len(line)
-                        call s:BuildDict(files, s:Relpath(curfile), printf("_%0" . digits . "d", nr), s:Relpath(line))
-                        let nr = nr + 1
-                    endif
-                endfor
-                let curfile = ""
-            elseif line != ""
-                let errlines = errlines + [ line ]
-            endif
-        endif
-
-        if line =~# "FAILED: .*"
-            let errlines = []
-            let curfile = split(line)[-1]
-            if curfile =~# "^../"
-                let curfile = curfile[3:]
-            endif
-        endif
-    endfor
-
-    call s:CreateTree(files, s:MakePlugin, "bottom", 30)
-    call b:NERDTreeRoot.openRecursively()
-    call nerdtree#renderView()
-endfunction
-
 function s:DebugCore(path)
     let core = a:path
     let logs = join(split(a:path, '/')[:-2], '/') . '/../tracelogs/memsql.log'
@@ -242,10 +153,8 @@ endfunction
 
 command! -nargs=0 FindCores call s:FindCores()
 command! -nargs=1 DebugCore call s:DebugCore(<q-args>)
-command! -nargs=0 RemoteMake call s:RemoteMake()
 
 command! -nargs=1 VimGrep call s:_VimGrep(<f-args>)
-command! -nargs=1 TestGrep call s:_TestGrep(<f-args>)
 command! -nargs=0 QFixTree call s:QFixTree()
 command! -nargs=? LocListTree call s:LocListTree(<f-args>)
 command! -nargs=? LocListJump call s:LocListJump(<f-args>)
