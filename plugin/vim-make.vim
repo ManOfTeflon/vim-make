@@ -220,7 +220,7 @@ function! s:RemoteMake()
     call nerdtree#renderView()
 endfunction
 
-function s:DebugCore(path)
+function! s:DebugCore(path)
     let core = a:path
     let logs = join(split(a:path, '/')[:-2], '/') . '/../tracelogs/memsql.log'
     echo logs
